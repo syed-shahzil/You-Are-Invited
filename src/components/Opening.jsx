@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FRAME_COUNT, FPS, loadFrame, warmCache } from '../lib/frames'
 
 const HOLD_MS = 1200
@@ -9,6 +9,10 @@ export default function Opening() {
   const canvas = useRef(null)
   const btn = useRef(null)
   const hint = useRef(null)
+  const ctl = useRef({ toggle: () => {} })
+  const [showSound, setShowSound] = useState(false)
+  const [soundOn, setSoundOn] = useState(false)
+  const [dbgLines, setDbgLines] = useState([])
 
   useEffect(() => {
     const h = document.documentElement
@@ -39,6 +43,17 @@ export default function Opening() {
     audio.preload = 'auto'
     audio.setAttribute('playsinline', '')
     audio.src = MUSIC_URL
+    // Open the site with #audio-debug at the end of the URL to see what the audio is doing.
+    const dbg = window.location.hash.includes('audio-debug')
+    const log = (m) => {
+      if (dbg) setDbgLines((l) => [...l.slice(-7), m])
+    }
+    if (dbg) {
+      log('url: ' + audio.src)
+      fetch(MUSIC_URL, { method: 'HEAD' })
+        .then((r) => log('file: HTTP ' + r.status + ' ' + (r.headers.get('content-type') || '')))
+        .catch((e) => log('file fetch failed: ' + e.message))
+    }
     let wantMusic = false
     let armed = false
     let loadTries = 0
@@ -61,7 +76,8 @@ export default function Opening() {
       if (!wantMusic || !alive) return
       const p = audio.play()
       if (p && p.catch) {
-        p.catch(() => {
+        p.catch((e) => {
+          log('play blocked: ' + e.name)
           if (wantMusic && alive) arm() // blocked: wait for the next real gesture
         })
       }
@@ -78,12 +94,21 @@ export default function Opening() {
         audio.currentTime = 0
       } catch (e) {}
     }
-    const onPlaying = () => disarm()
+    const onPlaying = () => {
+      log('playing')
+      setSoundOn(true)
+      disarm()
+    }
     const onPaused = () => {
+      log('paused')
+      setSoundOn(false)
       // paused by the system (call, tab switch) while we still want music
       if (wantMusic && alive) arm()
     }
+    const onCanPlay = () => log('can play (file loaded)')
     const onAudioError = () => {
+      const er = audio.error
+      log('audio error: code ' + (er ? er.code : '?') + ' (3=cannot decode, 4=file missing/unsupported)')
       if (!alive || loadTries >= 3) return
       loadTries++
       clearTimeout(loadTimer)
@@ -96,13 +121,25 @@ export default function Opening() {
     const onVisible = () => {
       if (document.visibilityState === 'visible' && wantMusic && audio.paused) tryPlay()
     }
+    audio.addEventListener('canplay', onCanPlay)
     audio.addEventListener('playing', onPlaying)
     audio.addEventListener('pause', onPaused)
     audio.addEventListener('error', onAudioError)
     document.addEventListener('visibilitychange', onVisible)
+    ctl.current.toggle = () => {
+      if (audio.paused) {
+        wantMusic = true
+        audio.play().catch((e) => log('button play failed: ' + e.name))
+      } else {
+        wantMusic = false
+        disarm()
+        audio.pause()
+      }
+    }
     const cleanupMusic = () => {
       stopMusic()
       clearTimeout(loadTimer)
+      audio.removeEventListener('canplay', onCanPlay)
       audio.removeEventListener('playing', onPlaying)
       audio.removeEventListener('pause', onPaused)
       audio.removeEventListener('error', onAudioError)
@@ -213,6 +250,7 @@ export default function Opening() {
 
     function play() {
       started = true
+      setShowSound(true)
       startMusic() // keep trying until it plays (finger lift / next tap unlocks it)
       hintEl.classList.remove('on')
       heroEl.classList.add('playing')
@@ -282,7 +320,24 @@ export default function Opening() {
     }
   }, [])
 
+  const btnStyle = {
+    position: 'fixed',
+    top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+    right: 12,
+    zIndex: 50,
+    width: 46,
+    height: 46,
+    borderRadius: '50%',
+    border: '1px solid #e8cf92',
+    background: 'linear-gradient(#a42b3e, #561823)',
+    boxShadow: '0 0 0 3px #2a0b12, 0 0 0 4px #c9a45c, 0 8px 16px rgba(0,0,0,.5)',
+    display: 'grid',
+    placeItems: 'center',
+    cursor: 'pointer',
+    padding: 0
+  }
   return (
+    <>
     <header className="hero" ref={hero}>
       <div className="stage">
         <canvas
@@ -305,5 +360,25 @@ export default function Opening() {
         SCROLL<i />
       </div>
     </header>
+    {showSound && (
+      <button
+        type="button"
+        style={btnStyle}
+        onClick={() => ctl.current.toggle()}
+        aria-label={soundOn ? 'Mute music' : 'Play music'}
+        title={soundOn ? 'Mute music' : 'Play music'}
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e8cf92" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z" fill="#e8cf92" />
+          {soundOn ? <path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /> : <path d="M17 9l5 6M22 9l-5 6" />}
+        </svg>
+      </button>
+    )}
+    {dbgLines.length > 0 && (
+      <pre style={{ position: 'fixed', left: 8, top: 8, zIndex: 60, pointerEvents: 'none', margin: 0, padding: '6px 8px', background: 'rgba(0,0,0,.8)', color: '#9f9', font: '11px/1.4 monospace', maxWidth: '92vw', whiteSpace: 'pre-wrap' }}>
+        {dbgLines.join('\n')}
+      </pre>
+    )}
+    </>
   )
 }
