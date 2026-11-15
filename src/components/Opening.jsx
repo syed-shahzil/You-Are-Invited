@@ -16,11 +16,6 @@ export default function Opening() {
     const heroEl = hero.current
     const btnEl = btn.current
     const hintEl = hint.current
-    // Background music (10 s clip, loops). File: public/audio/music.m4a
-    const audio = new Audio(`${import.meta.env.BASE_URL}audio/music.m4a`)
-    audio.loop = true
-    audio.volume = 0.6
-    audio.preload = 'auto'
     const bm = {}
     let started = false
     let ready = false
@@ -31,6 +26,90 @@ export default function Opening() {
     let hintTimer = 0
     let alive = true
     let scrollHandler = null
+
+    // ---------- Background music (public/audio/music.m4a, 10 s, loops) ----------
+    // Browsers only allow sound after a "real" gesture (on phones that means the
+    // finger LIFTING, not touching down). So we: (1) try immediately, (2) if blocked,
+    // retry on every following tap/touch-end/key press until it plays, (3) reload with a
+    // fresh URL if the file fails to load, and (4) resume if the tab/phone interrupts it.
+    const MUSIC_URL = `${import.meta.env.BASE_URL}audio/music.m4a`
+    const audio = new Audio()
+    audio.loop = true
+    audio.volume = 0.6
+    audio.preload = 'auto'
+    audio.setAttribute('playsinline', '')
+    audio.src = MUSIC_URL
+    let wantMusic = false
+    let armed = false
+    let loadTries = 0
+    let loadTimer = 0
+    const GESTURES = ['pointerup', 'touchend', 'click', 'keydown']
+    const onGesture = () => {
+      if (wantMusic && audio.paused) tryPlay()
+    }
+    const arm = () => {
+      if (armed) return
+      armed = true
+      GESTURES.forEach((n) => document.addEventListener(n, onGesture, true))
+    }
+    const disarm = () => {
+      if (!armed) return
+      armed = false
+      GESTURES.forEach((n) => document.removeEventListener(n, onGesture, true))
+    }
+    const tryPlay = () => {
+      if (!wantMusic || !alive) return
+      const p = audio.play()
+      if (p && p.catch) {
+        p.catch(() => {
+          if (wantMusic && alive) arm() // blocked: wait for the next real gesture
+        })
+      }
+    }
+    const startMusic = () => {
+      wantMusic = true
+      tryPlay()
+    }
+    const stopMusic = () => {
+      wantMusic = false
+      disarm()
+      audio.pause()
+      try {
+        audio.currentTime = 0
+      } catch (e) {}
+    }
+    const onPlaying = () => disarm()
+    const onPaused = () => {
+      // paused by the system (call, tab switch) while we still want music
+      if (wantMusic && alive) arm()
+    }
+    const onAudioError = () => {
+      if (!alive || loadTries >= 3) return
+      loadTries++
+      clearTimeout(loadTimer)
+      loadTimer = setTimeout(() => {
+        audio.src = `${MUSIC_URL}?retry=${loadTries}` // fresh URL bypasses a bad cached copy
+        audio.load()
+        if (wantMusic) tryPlay()
+      }, 500 * loadTries)
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && wantMusic && audio.paused) tryPlay()
+    }
+    audio.addEventListener('playing', onPlaying)
+    audio.addEventListener('pause', onPaused)
+    audio.addEventListener('error', onAudioError)
+    document.addEventListener('visibilitychange', onVisible)
+    const cleanupMusic = () => {
+      stopMusic()
+      clearTimeout(loadTimer)
+      audio.removeEventListener('playing', onPlaying)
+      audio.removeEventListener('pause', onPaused)
+      audio.removeEventListener('error', onAudioError)
+      document.removeEventListener('visibilitychange', onVisible)
+      audio.removeAttribute('src')
+      audio.load()
+    }
 
     const dec = (i) => {
       if (i >= FRAME_COUNT || i in bm) return
@@ -96,8 +175,7 @@ export default function Opening() {
       holding = true
       holdStart = performance.now()
       btnEl.classList.add('holding')
-      // Start music on the press itself: phones only allow sound after a touch.
-      audio.play().catch(() => {})
+      startMusic() // may be blocked until the finger lifts; retried automatically
       ahead(0)
       tick()
     }
@@ -106,8 +184,7 @@ export default function Opening() {
       holding = false
       cancelAnimationFrame(holdRaf)
       btnEl.classList.remove('holding')
-      audio.pause() // released too early: stop and rewind
-      audio.currentTime = 0
+      stopMusic() // released too early: stop and rewind
       prog(0)
       hintEl.classList.add('on')
       clearTimeout(hintTimer)
@@ -136,6 +213,7 @@ export default function Opening() {
 
     function play() {
       started = true
+      startMusic() // keep trying until it plays (finger lift / next tap unlocks it)
       hintEl.classList.remove('on')
       heroEl.classList.add('playing')
       let t0 = performance.now()
@@ -186,7 +264,7 @@ export default function Opening() {
       cancelAnimationFrame(holdRaf)
       cancelAnimationFrame(playRaf)
       stopWarm()
-      audio.pause()
+      cleanupMusic()
       document.removeEventListener('touchmove', stop)
       document.removeEventListener('wheel', stop)
       if (scrollHandler) window.removeEventListener('scroll', scrollHandler)
