@@ -16,6 +16,11 @@ export default function Opening() {
     const heroEl = hero.current
     const btnEl = btn.current
     const hintEl = hint.current
+    // Background music (10 s clip, loops). File: public/audio/music.m4a
+    const audio = new Audio(`${import.meta.env.BASE_URL}audio/music.m4a`)
+    audio.loop = true
+    audio.volume = 0.6
+    audio.preload = 'auto'
     const bm = {}
     let started = false
     let ready = false
@@ -91,6 +96,8 @@ export default function Opening() {
       holding = true
       holdStart = performance.now()
       btnEl.classList.add('holding')
+      // Start music on the press itself: phones only allow sound after a touch.
+      audio.play().catch(() => {})
       ahead(0)
       tick()
     }
@@ -99,6 +106,8 @@ export default function Opening() {
       holding = false
       cancelAnimationFrame(holdRaf)
       btnEl.classList.remove('holding')
+      audio.pause() // released too early: stop and rewind
+      audio.currentTime = 0
       prog(0)
       hintEl.classList.add('on')
       clearTimeout(hintTimer)
@@ -177,6 +186,7 @@ export default function Opening() {
       cancelAnimationFrame(holdRaf)
       cancelAnimationFrame(playRaf)
       stopWarm()
+      audio.pause()
       document.removeEventListener('touchmove', stop)
       document.removeEventListener('wheel', stop)
       if (scrollHandler) window.removeEventListener('scroll', scrollHandler)
