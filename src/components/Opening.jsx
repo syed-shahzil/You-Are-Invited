@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { FRAME_COUNT, FPS, loadFrame, warmCache } from '../lib/frames'
+// The music is bundled INTO the app at build time (no separate file, path or server request).
+// Keep the file at src/assets/music.m4a. If it is missing, the build fails loudly.
+import musicUrl from '../assets/music.m4a'
 
 const HOLD_MS = 1200
 const LOOKAHEAD = 16
@@ -9,6 +12,7 @@ export default function Opening() {
   const canvas = useRef(null)
   const btn = useRef(null)
   const hint = useRef(null)
+  const audioRef = useRef(null)
   const ctl = useRef({ toggle: () => {} })
   const [showSound, setShowSound] = useState(false)
   const [soundOn, setSoundOn] = useState(false)
@@ -31,33 +35,21 @@ export default function Opening() {
     let alive = true
     let scrollHandler = null
 
-    // ---------- Background music (public/audio/music.m4a, 10 s, loops) ----------
-    // Browsers only allow sound after a "real" gesture (on phones that means the
-    // finger LIFTING, not touching down). So we: (1) try immediately, (2) if blocked,
-    // retry on every following tap/touch-end/key press until it plays, (3) reload with a
-    // fresh URL if the file fails to load, and (4) resume if the tab/phone interrupts it.
-    const MUSIC_URL = `${import.meta.env.BASE_URL}audio/music.m4a`
-    const audio = new Audio()
+    // ---------- Background music ----------
+    // The <audio> element is rendered in the JSX below. Its source is the bundled music.
+    // Browsers only allow sound after a real gesture (on phones: the finger LIFTING), so we
+    // try immediately and, if blocked, retry on every following tap/touch-end/key press.
+    const audio = audioRef.current
     audio.loop = true
     audio.volume = 0.6
-    audio.preload = 'auto'
-    audio.setAttribute('playsinline', '')
-    audio.src = MUSIC_URL
-    // Open the site with #audio-debug at the end of the URL to see what the audio is doing.
+    // Add #audio-debug to the end of the page address to see what the audio is doing.
     const dbg = window.location.hash.includes('audio-debug')
     const log = (m) => {
       if (dbg) setDbgLines((l) => [...l.slice(-7), m])
     }
-    if (dbg) {
-      log('url: ' + audio.src)
-      fetch(MUSIC_URL, { method: 'HEAD' })
-        .then((r) => log('file: HTTP ' + r.status + ' ' + (r.headers.get('content-type') || '')))
-        .catch((e) => log('file fetch failed: ' + e.message))
-    }
+    if (dbg) log('music: bundled in the app (' + Math.round((musicUrl.length * 0.75) / 1024) + ' KB)')
     let wantMusic = false
     let armed = false
-    let loadTries = 0
-    let loadTimer = 0
     const GESTURES = ['pointerup', 'touchend', 'click', 'keydown']
     const onGesture = () => {
       if (wantMusic && audio.paused) tryPlay()
@@ -78,7 +70,7 @@ export default function Opening() {
       if (p && p.catch) {
         p.catch((e) => {
           log('play blocked: ' + e.name)
-          if (wantMusic && alive) arm() // blocked: wait for the next real gesture
+          if (wantMusic && alive) arm() // wait for the next real gesture
         })
       }
     }
@@ -102,22 +94,10 @@ export default function Opening() {
     const onPaused = () => {
       log('paused')
       setSoundOn(false)
-      // paused by the system (call, tab switch) while we still want music
-      if (wantMusic && alive) arm()
+      if (wantMusic && alive) arm() // paused by the system (call, tab switch)
     }
-    const onCanPlay = () => log('can play (file loaded)')
-    const onAudioError = () => {
-      const er = audio.error
-      log('audio error: code ' + (er ? er.code : '?') + ' (3=cannot decode, 4=file missing/unsupported)')
-      if (!alive || loadTries >= 3) return
-      loadTries++
-      clearTimeout(loadTimer)
-      loadTimer = setTimeout(() => {
-        audio.src = `${MUSIC_URL}?retry=${loadTries}` // fresh URL bypasses a bad cached copy
-        audio.load()
-        if (wantMusic) tryPlay()
-      }, 500 * loadTries)
-    }
+    const onCanPlay = () => log('music decoded and ready')
+    const onAudioError = () => log('audio error code ' + (audio.error ? audio.error.code : '?') + ' (3 = cannot decode, 4 = unsupported)')
     const onVisible = () => {
       if (document.visibilityState === 'visible' && wantMusic && audio.paused) tryPlay()
     }
@@ -138,14 +118,11 @@ export default function Opening() {
     }
     const cleanupMusic = () => {
       stopMusic()
-      clearTimeout(loadTimer)
       audio.removeEventListener('canplay', onCanPlay)
       audio.removeEventListener('playing', onPlaying)
       audio.removeEventListener('pause', onPaused)
       audio.removeEventListener('error', onAudioError)
       document.removeEventListener('visibilitychange', onVisible)
-      audio.removeAttribute('src')
-      audio.load()
     }
 
     const dec = (i) => {
@@ -338,6 +315,7 @@ export default function Opening() {
   }
   return (
     <>
+    <audio ref={audioRef} src={musicUrl} preload="auto" playsInline />
     <header className="hero" ref={hero}>
       <div className="stage">
         <canvas

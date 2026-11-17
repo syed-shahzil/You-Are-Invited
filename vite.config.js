@@ -11,5 +11,10 @@ export default defineConfig(({ mode }) => ({
   build:
     mode === 'single'
       ? { outDir: 'dist-single', copyPublicDir: false, assetsInlineLimit: 100000000 }
-      : { outDir: 'dist' }
+      : {
+          outDir: 'dist',
+          // Embed the music (.m4a) directly inside the JavaScript so playback never depends on
+          // a separate file request (no wrong paths, 404s, MIME or caching problems).
+          assetsInlineLimit: (file) => (file.endsWith('.m4a') ? true : undefined)
+        }
 }))
