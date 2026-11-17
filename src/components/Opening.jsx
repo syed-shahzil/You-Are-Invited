@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { FRAME_COUNT, FPS, loadFrame, warmCache } from '../lib/frames'
-// The music is bundled INTO the app at build time (no separate file, path or server request).
-// Keep the file at src/assets/music.m4a. If it is missing, the build fails loudly.
-import musicUrl from '../assets/music.m4a'
+// Music source, most robust first:
+//  1. src/assets/music.m4a  -> bundled INSIDE the app (needs no file request at all)
+//  2. public/audio/music.m4a -> normal file next to the site (used if (1) does not exist)
+// If (1) is missing the build still succeeds, so a forgotten file can never break the site.
+const bundled = import.meta.glob('../assets/music.m4a', { eager: true, import: 'default' })
+const bundledUrl = Object.values(bundled)[0]
+const musicUrl = bundledUrl || `${import.meta.env.BASE_URL}audio/music.m4a`
 
 const HOLD_MS = 1200
 const LOOKAHEAD = 16
@@ -47,7 +51,9 @@ export default function Opening() {
     const log = (m) => {
       if (dbg) setDbgLines((l) => [...l.slice(-7), m])
     }
-    if (dbg) log('music: bundled in the app (' + Math.round((musicUrl.length * 0.75) / 1024) + ' KB)')
+    if (dbg) {
+      log(bundledUrl ? 'music: bundled in the app (' + Math.round((musicUrl.length * 0.75) / 1024) + ' KB)' : 'music: loading file ' + musicUrl)
+    }
     let wantMusic = false
     let armed = false
     const GESTURES = ['pointerup', 'touchend', 'click', 'keydown']
